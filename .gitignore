@@ -2,9 +2,14 @@
 
 # dependencies
 node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+# Note: package-lock.json should be committed
 
 # Expo
 .expo/
+.expo-shared/
 dist/
 web-build/
 expo-env.d.ts
@@ -29,9 +34,30 @@ yarn-error.*
 # macOS
 .DS_Store
 *.pem
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
 
 # local env files
+.env
 .env*.local
+.env.production
+.env.development
 
 # typescript
 *.tsbuildinfo
@@ -39,3 +65,22 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Build outputs
+build/
+*.apk
+*.aab
+*.ipa
+
+# Logs
+logs/
+*.log
+
+# Testing
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
