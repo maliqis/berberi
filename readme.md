@@ -18,24 +18,140 @@
 
 ## 📋 Table of Contents
 
-- [Overview](#-overview)
-- [Features](#-features)
-- [Screenshots](#-screenshots)
-- [Tech Stack](#-tech-stack)
-- [Prerequisites](#-prerequisites)
-- [Installation](#-installation)
-- [Usage](#-usage)
-- [Project Structure](#-project-structure)
-- [Key Components](#-key-components)
-- [Architecture](#-architecture)
-- [Internationalization](#-internationalization)
-- [Database Schema](#-database-schema)
-- [API Integration](#-api-integration)
-- [Development](#-development)
-- [Building for Production](#-building-for-production)
-- [Contributing](#-contributing)
-- [License](#-license)
-- [Contact](#-contact)
+<div align="center">
+
+### 🎯 Quick Navigation
+
+<table>
+<tr>
+<td align="center" width="33.33%">
+<strong>🚀 Quick Start</strong>
+<br><br>
+<a href="#-overview">📖 Overview</a><br>
+<a href="#-installation">⚙️ Installation</a><br>
+<a href="#-usage">💻 Usage</a>
+</td>
+<td align="center" width="33.33%">
+<strong>📚 Documentation</strong>
+<br><br>
+<a href="#-architecture">🏗️ Architecture</a><br>
+<a href="#-project-structure">📁 Structure</a><br>
+<a href="#-key-components">🧩 Components</a>
+</td>
+<td align="center" width="33.33%">
+<strong>🛠️ Development</strong>
+<br><br>
+<a href="#-development">🔧 Development</a><br>
+<a href="#-building-for-production">📦 Production</a><br>
+<a href="#-contributing">🤝 Contributing</a>
+</td>
+</tr>
+</table>
+
+</div>
+
+---
+
+<details>
+<summary>
+  <h3>
+    <b>📖 Complete Table of Contents</b>
+    <span style="float: right;">▶️ Click to expand</span>
+  </h3>
+</summary>
+
+<br>
+
+<div align="center">
+
+<table>
+<tr>
+<td valign="top" width="50%">
+
+#### 🎯 Getting Started
+
+> **Essential information to begin your journey**
+
+- 🎯 **[Overview](#-overview)**  
+  <sub>Project introduction and key highlights</sub>
+
+- ✨ **[Features](#-features)**  
+  <sub>Complete feature list with descriptions</sub>
+
+- 📸 **[Screenshots](#-screenshots)**  
+  <sub>Visual previews of the application</sub>
+
+#### 🛠️ Setup & Configuration
+
+> **Everything you need to get started**
+
+- 🛠️ **[Tech Stack](#-tech-stack)**  
+  <sub>Technologies and dependencies used</sub>
+
+- 📋 **[Prerequisites](#-prerequisites)**  
+  <sub>Required tools and software</sub>
+
+- 🚀 **[Installation](#-installation)**  
+  <sub>Step-by-step setup guide</sub>
+
+- 💻 **[Usage](#-usage)**  
+  <sub>How to use the application</sub>
+
+</td>
+<td valign="top" width="50%">
+
+#### 🏗️ Technical Documentation
+
+> **Deep dive into the technical details**
+
+- 📁 **[Project Structure](#-project-structure)**  
+  <sub>Directory organization explained</sub>
+
+- 🧩 **[Key Components](#-key-components)**  
+  <sub>Important components breakdown</sub>
+
+- 🏗️ **[Architecture](#-architecture)**  
+  <sub>System design and data flow</sub>
+
+- 🌍 **[Internationalization](#-internationalization)**  
+  <sub>Multi-language support guide</sub>
+
+- 🗄️ **[Database Schema](#-database-schema)**  
+  <sub>Data models and relationships</sub>
+
+- 🔌 **[API Integration](#-api-integration)**  
+  <sub>Backend integration guide</sub>
+
+#### 👨‍💻 Developer Resources
+
+> **Tools and guides for developers**
+
+- 🛠️ **[Development](#-development)**  
+  <sub>Development workflow and practices</sub>
+
+- 📦 **[Building for Production](#-building-for-production)**  
+  <sub>Build and deployment instructions</sub>
+
+- 🤝 **[Contributing](#-contributing)**  
+  <sub>Contribution guidelines</sub>
+
+#### 📄 Legal & Support
+
+> **License and contact information**
+
+- 📄 **[License](#-license)**  
+  <sub>License information</sub>
+
+- 👥 **[Contact](#-contact)**  
+  <sub>Support and contact details</sub>
+
+</td>
+</tr>
+</table>
+
+</div>
+
+</details>
 
 ---
 
