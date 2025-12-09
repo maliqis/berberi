@@ -7,7 +7,8 @@ import api from './api';
 class ReservationService {
   /**
    * Get all reservations for current user
-   * @param {Object} params - Query parameters (e.g., { shopId, date, barberId })
+   * @param {Object} params - Query parameters (e.g., { date, barberId, status })
+   *   Note: For barberAdmin, shopId is implicit from authenticated user (not a query param)
    * @returns {Promise<Array>}
    */
   async getReservations(params = {}) {

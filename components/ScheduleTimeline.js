@@ -374,8 +374,9 @@ const ScheduleTimeline = () => {
       if (!shop?.id) return;
 
       const dateString = formatDateForAPI(selectedDate);
+      // API contract: For barberAdmin, shopId is implicit from authenticated user
+      // Query params are: date?, barberId?, status? (NOT shopId)
       const params = {
-        shopId: shop.id,
         date: dateString,
       };
 
