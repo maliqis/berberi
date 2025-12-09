@@ -602,6 +602,18 @@ const styles = StyleSheet.create({
   __content_container: {
     paddingTop: 12,
   },
+  __loading_container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  __loading_text: {
+    marginTop: 16,
+    fontSize: 16,
+    fontFamily: 'Poppins_400Regular',
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
   __title: {
     fontSize: 24,
     fontFamily: 'Poppins_700Bold',
