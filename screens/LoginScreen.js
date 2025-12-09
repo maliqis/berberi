@@ -7,55 +7,60 @@ import {
   TextInput,
   KeyboardAvoidingView,
   Platform,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
 import NavBar from '../components/NavBar';
+import { useAuth } from '../context/AuthContext';
 
-const LoginScreen = ({ onLogin, onNavigateToSignup, onNavigateToForgotPassword, onGoBack }) => {
+const LoginScreen = ({ onNavigateToSignup, onNavigateToForgotPassword, onGoBack }) => {
   const { t } = useTranslation();
+  const { login } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = () => {
-    if (email && password) {
-      // Dummy users for testing
-      // Customer: customer@test.com
-      // Barber Admin: admin@test.com
-      let role = 'user';
-      let name = 'Customer User';
-      
-      if (email.toLowerCase() === 'admin@test.com' || email.toLowerCase() === 'barber@test.com') {
-        role = 'barber';
-        name = 'Barber Admin';
-      } else if (email.toLowerCase() === 'customer@test.com' || email.toLowerCase() === 'user@test.com') {
-        role = 'user';
-        name = 'Customer User';
-      }
-      
-      onLogin({ email, role, name });
+  const handleLogin = async () => {
+    if (!email || !password) {
+      Alert.alert(
+        t('login.errorTitle') || 'Error',
+        t('login.fillAllFields') || 'Please fill in all fields'
+      );
+      return;
+    }
+
+    setIsLoading(true);
+    try {
+      await login({ email, password });
+      // Navigation will be handled by App.js based on user role
+    } catch (error) {
+      Alert.alert(
+        t('login.errorTitle') || 'Login Failed',
+        error.message || t('login.invalidCredentials') || 'Invalid email or password. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
     }
   };
   
-  const handleQuickLogin = (userType) => {
+  const handleQuickLogin = async (userType) => {
+    // Quick login for testing - can be removed in production
     if (userType === 'customer') {
       setEmail('customer@test.com');
       setPassword('password123');
-      // Auto login after setting credentials
-      setTimeout(() => {
-        onLogin({ email: 'customer@test.com', role: 'user', name: 'Customer User' });
-      }, 100);
     } else if (userType === 'barber') {
       setEmail('admin@test.com');
       setPassword('password123');
-      // Auto login after setting credentials
-      setTimeout(() => {
-        onLogin({ email: 'admin@test.com', role: 'barber', name: 'Barber Admin' });
-      }, 100);
     }
+    // Auto login after setting credentials
+    setTimeout(() => {
+      handleLogin();
+    }, 100);
   };
 
   return (
@@ -124,9 +129,10 @@ const LoginScreen = ({ onLogin, onNavigateToSignup, onNavigateToForgotPassword, 
             </View>
 
             <TouchableOpacity
-              style={styles.__login_button}
+              style={[styles.__login_button, isLoading && styles.__login_button_disabled]}
               onPress={handleLogin}
               activeOpacity={0.9}
+              disabled={isLoading}
             >
               <LinearGradient
                 colors={['#FFD700', '#FFA500']}
@@ -134,7 +140,11 @@ const LoginScreen = ({ onLogin, onNavigateToSignup, onNavigateToForgotPassword, 
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
               >
-                <Text style={styles.__login_button_text}>{t('login.loginButton')}</Text>
+                {isLoading ? (
+                  <ActivityIndicator color="#1a1a2e" />
+                ) : (
+                  <Text style={styles.__login_button_text}>{t('login.loginButton')}</Text>
+                )}
               </LinearGradient>
               <View style={styles.__button_shadow} />
             </TouchableOpacity>
@@ -285,6 +295,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_700Bold',
     color: '#1a1a2e',
     letterSpacing: 0.5,
+  },
+  __login_button_disabled: {
+    opacity: 0.6,
   },
   __forgot_password_link: {
     alignItems: 'center',
