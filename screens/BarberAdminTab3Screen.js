@@ -9,17 +9,21 @@ import {
   Image,
   Alert,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useTranslation } from 'react-i18next';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import NavBar from '../components/NavBar';
 import { useAuth } from '../context/AuthContext';
+import barberService from '../services/barberService';
+import employeeService from '../services/employeeService';
+import { api } from '../services/api';
 
 const BarberAdminTab3Screen = () => {
   const { t } = useTranslation();
@@ -28,38 +32,28 @@ const BarberAdminTab3Screen = () => {
   const { user, logout, updateUser } = useAuth();
 
   // Shop settings state
-  const [shopName, setShopName] = useState(user?.shopName || '');
-  const [logo, setLogo] = useState(user?.logo || null);
-  const [workingDays, setWorkingDays] = useState(user?.workingDays || []);
+  const [shop, setShop] = useState(null);
+  const [shopName, setShopName] = useState('');
+  const [logo, setLogo] = useState(null);
+  const [workingDays, setWorkingDays] = useState([]);
   const [shiftStart, setShiftStart] = useState(() => {
-    if (user?.shiftStart) {
-      const [hours, minutes] = user.shiftStart.split(':');
-      const date = new Date();
-      date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-      return date;
-    }
     const date = new Date();
     date.setHours(9, 0, 0, 0);
     return date;
   });
   const [shiftEnd, setShiftEnd] = useState(() => {
-    if (user?.shiftEnd) {
-      const [hours, minutes] = user.shiftEnd.split(':');
-      const date = new Date();
-      date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
-      return date;
-    }
     const date = new Date();
     date.setHours(17, 0, 0, 0);
     return date;
   });
-  const [slotLengthMinutes, setSlotLengthMinutes] = useState(user?.slotLengthMinutes || 30);
+  const [slotLengthMinutes, setSlotLengthMinutes] = useState(30);
   const [showStartTimePicker, setShowStartTimePicker] = useState(false);
   const [showEndTimePicker, setShowEndTimePicker] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Employees state
-  const [employees, setEmployees] = useState(user?.employees || []);
+  const [employees, setEmployees] = useState([]);
   const [newEmployeeName, setNewEmployeeName] = useState('');
   const [showAddEmployee, setShowAddEmployee] = useState(false);
 
@@ -93,15 +87,60 @@ const BarberAdminTab3Screen = () => {
     { key: 0, label: t('signup.sunday') || 'Sun' },
   ];
 
-  useEffect(() => {
-    if (user) {
-      setShopName(user.shopName || '');
-      setLogo(user.logo || null);
-      setWorkingDays(user.workingDays || []);
-      setSlotLengthMinutes(user.slotLengthMinutes || 30);
-      setEmployees(user.employees || []);
+  // Load shop data and employees on mount and when screen is focused
+  useFocusEffect(
+    React.useCallback(() => {
+      loadShopData();
+    }, [user])
+  );
+
+  const loadShopData = async () => {
+    try {
+      setIsLoading(true);
+      const shopId = user?.shopId;
+      if (!shopId) {
+        Alert.alert(
+          t('settings.errorTitle') || 'Error',
+          t('settings.noShop') || 'No shop associated with your account.'
+        );
+        return;
+      }
+
+      // Load shop details
+      const shopData = await barberService.getBarberById(shopId);
+      setShop(shopData);
+      setShopName(shopData.name || '');
+      setLogo(shopData.logoUrl || shopData.logo || null);
+      setWorkingDays(shopData.workingDays || []);
+      setSlotLengthMinutes(shopData.slotLengthMinutes || 30);
+
+      // Parse shift times
+      if (shopData.shiftStart) {
+        const [hours, minutes] = shopData.shiftStart.split(':');
+        const date = new Date();
+        date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        setShiftStart(date);
+      }
+      if (shopData.shiftEnd) {
+        const [hours, minutes] = shopData.shiftEnd.split(':');
+        const date = new Date();
+        date.setHours(parseInt(hours), parseInt(minutes), 0, 0);
+        setShiftEnd(date);
+      }
+
+      // Load employees
+      const employeesData = await employeeService.getEmployees(shopId);
+      setEmployees(employeesData);
+    } catch (error) {
+      console.error('Error loading shop data:', error);
+      Alert.alert(
+        t('settings.errorTitle') || 'Error',
+        error.message || t('settings.loadError') || 'Failed to load shop data.'
+      );
+    } finally {
+      setIsLoading(false);
     }
-  }, [user]);
+  };
 
   const handleLogoPress = () => {
     const parent = navigation.getParent();
@@ -184,30 +223,39 @@ const BarberAdminTab3Screen = () => {
 
     setIsSaving(true);
     try {
-      await updateUser({
-        shopName: shopName.trim(),
-        logo,
+      if (!shop?.id) {
+        throw new Error('No shop ID available');
+      }
+
+      // Update shop via API
+      await api.put(`/barbers/${shop.id}`, {
+        name: shopName.trim(),
+        logoUrl: logo,
         workingDays: workingDays.sort(),
         shiftStart: formatTime(shiftStart),
         shiftEnd: formatTime(shiftEnd),
         slotLengthMinutes: slotLength,
-        employees,
       });
+
+      // Reload shop data to get updated values
+      await loadShopData();
+
       Alert.alert(
         t('settings.successTitle') || 'Success',
         t('settings.savedSuccessfully') || 'Settings saved successfully'
       );
     } catch (error) {
+      console.error('Error saving settings:', error);
       Alert.alert(
         t('settings.errorTitle') || 'Error',
-        t('settings.saveError') || 'Failed to save settings'
+        error.message || t('settings.saveError') || 'Failed to save settings'
       );
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleAddEmployee = () => {
+  const handleAddEmployee = async () => {
     if (!newEmployeeName.trim()) {
       Alert.alert(
         t('settings.errorTitle') || 'Error',
@@ -223,17 +271,37 @@ const BarberAdminTab3Screen = () => {
       return;
     }
 
-    const newEmployee = {
-      id: `emp_${Date.now()}`,
-      name: newEmployeeName.trim(),
-      shiftStart: formatTime(shiftStart),
-      shiftEnd: formatTime(shiftEnd),
-      slotLengthMinutes: parseInt(slotLengthMinutes),
-    };
+    if (!shop?.id) {
+      Alert.alert(
+        t('settings.errorTitle') || 'Error',
+        t('settings.noShop') || 'No shop ID available'
+      );
+      return;
+    }
 
-    setEmployees([...employees, newEmployee]);
-    setNewEmployeeName('');
-    setShowAddEmployee(false);
+    try {
+      const employeeData = {
+        name: newEmployeeName.trim(),
+        shiftStart: formatTime(shiftStart),
+        shiftEnd: formatTime(shiftEnd),
+        slotLengthMinutes: parseInt(slotLengthMinutes),
+      };
+
+      await employeeService.createEmployee(shop.id, employeeData);
+      
+      // Reload employees
+      const employeesData = await employeeService.getEmployees(shop.id);
+      setEmployees(employeesData);
+      
+      setNewEmployeeName('');
+      setShowAddEmployee(false);
+    } catch (error) {
+      console.error('Error adding employee:', error);
+      Alert.alert(
+        t('settings.errorTitle') || 'Error',
+        error.message || t('settings.addEmployeeError') || 'Failed to add employee'
+      );
+    }
   };
 
   const handleRemoveEmployee = (employeeId) => {
@@ -245,8 +313,23 @@ const BarberAdminTab3Screen = () => {
         {
           text: t('settings.remove') || 'Remove',
           style: 'destructive',
-          onPress: () => {
-            setEmployees(employees.filter(emp => emp.id !== employeeId));
+          onPress: async () => {
+            try {
+              if (!shop?.id) {
+                throw new Error('No shop ID available');
+              }
+              await employeeService.deleteEmployee(shop.id, employeeId);
+              
+              // Reload employees
+              const employeesData = await employeeService.getEmployees(shop.id);
+              setEmployees(employeesData);
+            } catch (error) {
+              console.error('Error removing employee:', error);
+              Alert.alert(
+                t('settings.errorTitle') || 'Error',
+                error.message || t('settings.removeEmployeeError') || 'Failed to remove employee'
+              );
+            }
           },
         },
       ]
@@ -261,6 +344,14 @@ const BarberAdminTab3Screen = () => {
       <StatusBar style="light" />
       <NavBar onLogoPress={handleLogoPress} onLogout={handleLogout} />
       
+      {isLoading ? (
+        <View style={styles.__loading_container}>
+          <ActivityIndicator size="large" color="#FFD700" />
+          <Text style={styles.__loading_text}>
+            {t('settings.loading') || 'Loading settings...'}
+          </Text>
+        </View>
+      ) : (
       <ScrollView
         style={styles.__scroll_view}
         contentContainerStyle={[
@@ -496,6 +587,7 @@ const BarberAdminTab3Screen = () => {
           </LinearGradient>
         </TouchableOpacity>
       </ScrollView>
+      )}
     </LinearGradient>
   );
 };
