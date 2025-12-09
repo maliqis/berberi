@@ -111,8 +111,15 @@ const apiRequest = async (endpoint, options = {}, retryCount = 0) => {
         const retryResponse = await fetch(url, config);
         
         if (!retryResponse.ok) {
-          const errorData = await retryResponse.json().catch(() => ({ message: 'An error occurred' }));
-          throw new Error(errorData.message || `HTTP error! status: ${retryResponse.status}`);
+          const errorData = await retryResponse.json().catch(() => ({ error: { message: 'An error occurred' } }));
+          // API contract: errors are in format { error: { code, message, details } }
+          const error = errorData.error || errorData;
+          const errorMessage = error.message || errorData.message || `HTTP error! status: ${retryResponse.status}`;
+          const errorCode = error.code || `HTTP_${retryResponse.status}`;
+          const apiError = new Error(errorMessage);
+          apiError.code = errorCode;
+          apiError.details = error.details;
+          throw apiError;
         }
         
         const data = await retryResponse.json();
@@ -127,8 +134,15 @@ const apiRequest = async (endpoint, options = {}, retryCount = 0) => {
     }
     
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ message: 'An error occurred' }));
-      throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
+      const errorData = await response.json().catch(() => ({ error: { message: 'An error occurred' } }));
+      // API contract: errors are in format { error: { code, message, details } }
+      const error = errorData.error || errorData;
+      const errorMessage = error.message || errorData.message || `HTTP error! status: ${response.status}`;
+      const errorCode = error.code || `HTTP_${response.status}`;
+      const apiError = new Error(errorMessage);
+      apiError.code = errorCode;
+      apiError.details = error.details;
+      throw apiError;
     }
 
     const data = await response.json();

@@ -54,7 +54,7 @@ class ReservationService {
     try {
       const payload = {
         shopId: reservationData.shopId,
-        date: reservationData.date, // ISO date string
+        date: reservationData.date, // Should be "YYYY-MM-DD" format (not ISO string)
         time: reservationData.time, // HH:mm format
         firstName: reservationData.firstName,
         lastName: reservationData.lastName,

@@ -608,7 +608,7 @@ const MyBarberScreen = () => {
                 // Create reservation via API
                 const reservationData = {
                   shopId: shop.id,
-                  date: selectedDate.toISOString(),
+                  date: formatDateForAPI(selectedDate), // Use YYYY-MM-DD format, not ISO string
                   time: selectedTime,
                   firstName: firstName.trim() || user?.firstName || '',
                   lastName: lastName.trim() || user?.lastName || '',

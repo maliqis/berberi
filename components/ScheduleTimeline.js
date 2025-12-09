@@ -480,7 +480,7 @@ const ScheduleTimeline = () => {
       const reservationData = {
         shopId: shop.id,
         barberId: selectedBarberForReservation,
-        date: selectedDate.toISOString(),
+        date: formatDateForAPI(selectedDate), // Use YYYY-MM-DD format, not ISO string
         time: selectedSlotTime,
         firstName: firstName.trim() || 'Klienti',
         lastName: lastName.trim() || '',

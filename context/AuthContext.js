@@ -81,16 +81,15 @@ export const AuthProvider = ({ children }) => {
         role: userData.role || 'user',
       };
 
-      // If barber admin, include shop info
+      // If barber admin, include shop info as FLAT fields (not nested)
+      // API contract requires flat structure: shopName, logo (not logoUrl), workingDays, etc.
       if (userData.role === 'barber' || userData.role === 'barberAdmin') {
-        payload.shop = {
-          name: userData.shopName,
-          logoUrl: userData.logo || null,
-          workingDays: userData.workingDays || [],
-          shiftStart: userData.shiftStart,
-          shiftEnd: userData.shiftEnd,
-          slotLengthMinutes: userData.slotLengthMinutes,
-        };
+        payload.shopName = userData.shopName;
+        payload.logo = userData.logo || null; // API contract uses "logo" in signup, not "logoUrl"
+        payload.workingDays = userData.workingDays || [];
+        payload.shiftStart = userData.shiftStart;
+        payload.shiftEnd = userData.shiftEnd;
+        payload.slotLengthMinutes = userData.slotLengthMinutes;
       }
 
       const response = await api.post('/auth/signup', payload);
