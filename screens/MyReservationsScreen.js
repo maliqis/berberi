@@ -8,38 +8,19 @@ import {
   Image,
   TextInput,
   Alert,
+  ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/AuthContext';
 import NavBar from '../components/NavBar';
-
-const RESERVATIONS_STORAGE_KEY = '@berberi_reservations';
-
-// Barber data for migration (matching MyBarberScreen)
-const barbers = [
-  {
-    id: 'barber1',
-    name: 'John Smith',
-    image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
-    shiftStart: '09:00',
-    shiftEnd: '17:00',
-    slotLengthMinutes: 60,
-  },
-  {
-    id: 'barber2',
-    name: 'Mike Johnson',
-    image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
-    shiftStart: '10:00',
-    shiftEnd: '18:00',
-    slotLengthMinutes: 30,
-  },
-];
+import reservationService from '../services/reservationService';
+import api from '../services/api';
 
 // Barber Avatar Component with placeholder
 const BarberAvatar = ({ imageUri, style }) => {
@@ -62,51 +43,6 @@ const BarberAvatar = ({ imageUri, style }) => {
   );
 };
 
-// Migration function to update "Auto Select" reservations with real barber names
-const migrateReservations = (reservations) => {
-  const autoSelectNames = ['Auto Select', 'Zgjidhje automatike', 'Аутоматски избор'];
-  
-  return reservations.map(reservation => {
-    // Check if this reservation has an auto-select name
-    if (autoSelectNames.includes(reservation.barberName)) {
-      // Try to find a barber that would be available for this time slot
-      const reservationDate = new Date(reservation.date);
-      const reservationTime = reservation.time;
-      
-      // Find the first barber whose shift includes this time
-      const assignedBarber = barbers.find(barber => {
-        const startHour = parseInt(barber.shiftStart.split(':')[0]);
-        const startMinute = parseInt(barber.shiftStart.split(':')[1]) || 0;
-        const endHour = parseInt(barber.shiftEnd.split(':')[0]);
-        const endMinute = parseInt(barber.shiftEnd.split(':')[1]) || 0;
-        const slotLengthMinutes = barber.slotLengthMinutes || 60;
-        
-        const timeHour = parseInt(reservationTime.split(':')[0]);
-        const timeMinute = parseInt(reservationTime.split(':')[1]) || 0;
-        
-        const startTotalMinutes = startHour * 60 + startMinute;
-        const endTotalMinutes = endHour * 60 + endMinute;
-        const timeTotalMinutes = timeHour * 60 + timeMinute;
-        
-        // Check if time is within shift and there's enough time for the appointment
-        return timeTotalMinutes >= startTotalMinutes && 
-               timeTotalMinutes + slotLengthMinutes <= endTotalMinutes;
-      });
-      
-      // If we found a suitable barber, assign them; otherwise use the first barber
-      const barber = assignedBarber || barbers[0];
-      
-      return {
-        ...reservation,
-        barberName: barber.name,
-        barberImage: barber.image,
-        barberId: barber.id,
-      };
-    }
-    
-    return reservation;
-  });
-};
 
 const MyReservationsScreen = () => {
   const { t } = useTranslation();
@@ -118,17 +54,15 @@ const MyReservationsScreen = () => {
   const [profileFirstName, setProfileFirstName] = useState(user?.firstName || user?.name?.split(' ')[0] || '');
   const [profileLastName, setProfileLastName] = useState(user?.lastName || user?.name?.split(' ').slice(1).join(' ') || '');
   const [isSaving, setIsSaving] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadReservations();
-    
-    // Also reload when screen comes into focus to catch any new reservations
-    const unsubscribe = navigation.addListener('focus', () => {
+  // Load reservations on mount and when screen is focused
+  useFocusEffect(
+    React.useCallback(() => {
       loadReservations();
-    });
-    
-    return unsubscribe;
-  }, [navigation]);
+    }, [])
+  );
 
   // Update profile fields when user changes
   useEffect(() => {
@@ -190,7 +124,8 @@ const MyReservationsScreen = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await updateUser({ isActive: false });
+              // API contract: DELETE /me deactivates account (returns 204 No Content)
+              await api.delete('/me');
               Alert.alert(
                 t('profile.deactivateSuccessTitle') || 'Account Deactivated',
                 t('profile.deactivateSuccessMessage') || 'Your account has been deactivated. You will be logged out.',
@@ -212,7 +147,7 @@ const MyReservationsScreen = () => {
             } catch (error) {
               Alert.alert(
                 t('profile.errorTitle') || 'Error',
-                t('profile.deactivateError') || 'Failed to deactivate account. Please try again.'
+                error.message || t('profile.deactivateError') || 'Failed to deactivate account. Please try again.'
               );
             }
           },
@@ -221,55 +156,43 @@ const MyReservationsScreen = () => {
     );
   };
 
-  const loadReservations = async () => {
+  const loadReservations = async (isRefresh = false) => {
     try {
-      const storedReservations = await AsyncStorage.getItem(RESERVATIONS_STORAGE_KEY);
-      if (storedReservations) {
-        const parsedReservations = JSON.parse(storedReservations);
-        // Migrate reservations to update "Auto Select" names
-        const migratedReservations = migrateReservations(parsedReservations);
-        
-        // Check if migration changed anything
-        const needsUpdate = JSON.stringify(parsedReservations) !== JSON.stringify(migratedReservations);
-        if (needsUpdate) {
-          // Save migrated reservations back to storage
-          await AsyncStorage.setItem(RESERVATIONS_STORAGE_KEY, JSON.stringify(migratedReservations));
-        }
-        
-        setReservations(migratedReservations);
+      if (isRefresh) {
+        setRefreshing(true);
       } else {
-        // Initialize with dummy data if no reservations exist
-        const dummyReservations = [
-          {
-            barberName: 'John Smith',
-            shopName: 'Classic Cuts',
-            barberImage: 'https://invalid-url-that-will-fail.com/image.jpg', // Invalid URL to show avatar
-            date: new Date().toISOString(),
-            time: '11:00',
-            barberId: 'barber1',
-          },
-          {
-            barberName: 'Mike Johnson',
-            shopName: 'Classic Cuts',
-            barberImage: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
-            date: new Date(Date.now() + 86400000).toISOString(), // Tomorrow
-            time: '14:30',
-            barberId: 'barber2',
-          },
-          {
-            barberName: 'John Smith',
-            shopName: 'Classic Cuts',
-            barberImage: null, // No image to show avatar
-            date: new Date(Date.now() + 2 * 86400000).toISOString(), // Day after tomorrow
-            time: '15:00',
-            barberId: 'barber1',
-          },
-        ];
-        await AsyncStorage.setItem(RESERVATIONS_STORAGE_KEY, JSON.stringify(dummyReservations));
-        setReservations(dummyReservations);
+        setIsLoading(true);
       }
+
+      const reservationsData = await reservationService.getReservations();
+      
+      // Transform API response to match UI expectations
+      const transformedReservations = reservationsData.map(reservation => ({
+        id: reservation.id,
+        barberName: reservation.barberId ? `Barber ${reservation.barberId}` : t('myBarber.autoSelect') || 'Auto Select',
+        shopName: reservation.shopName || 'Barbershop',
+        barberImage: reservation.barberImage || null,
+        date: reservation.date,
+        time: reservation.time,
+        barberId: reservation.barberId,
+        firstName: reservation.firstName,
+        lastName: reservation.lastName,
+        comment: reservation.comment,
+        status: reservation.status,
+        createdAt: reservation.createdAt,
+        updatedAt: reservation.updatedAt,
+      }));
+
+      setReservations(transformedReservations);
     } catch (error) {
       console.error('Error loading reservations:', error);
+      Alert.alert(
+        t('reservations.errorTitle') || 'Error',
+        error.message || t('reservations.loadError') || 'Failed to load reservations. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -290,6 +213,40 @@ const MyReservationsScreen = () => {
     } else {
       navigation.replace('Landing');
     }
+  };
+
+  // Handle cancel reservation
+  const handleCancelReservation = async (reservationId) => {
+    Alert.alert(
+      t('reservations.cancelTitle') || 'Cancel Reservation',
+      t('reservations.cancelMessage') || 'Are you sure you want to cancel this reservation?',
+      [
+        {
+          text: t('reservations.no') || 'No',
+          style: 'cancel',
+        },
+        {
+          text: t('reservations.yes') || 'Yes',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await reservationService.cancelReservation(reservationId);
+              // Reload reservations
+              await loadReservations();
+              Alert.alert(
+                t('reservations.cancelSuccessTitle') || 'Reservation Canceled',
+                t('reservations.cancelSuccessMessage') || 'Your reservation has been canceled successfully.'
+              );
+            } catch (error) {
+              Alert.alert(
+                t('reservations.errorTitle') || 'Error',
+                error.message || t('reservations.cancelError') || 'Failed to cancel reservation. Please try again.'
+              );
+            }
+          },
+        },
+      ]
+    );
   };
 
   const formatDate = (dateString) => {
@@ -337,6 +294,13 @@ const MyReservationsScreen = () => {
           style={styles.__content}
           contentContainerStyle={styles.__content_container}
           showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => loadReservations(true)}
+              tintColor="#FFD700"
+            />
+          }
         >
           {/* Profile Section */}
           <View style={styles.__profile_section}>
@@ -478,6 +442,25 @@ const MyReservationsScreen = () => {
                   </View>
                   <View style={styles.__table_cell}>
                     <Text style={styles.__table_cell_text}>{reservation.time}</Text>
+                  </View>
+                  <View style={styles.__table_cell}>
+                    {reservation.status !== 'canceled' && (
+                      <TouchableOpacity
+                        style={styles.__cancel_reservation_button}
+                        onPress={() => handleCancelReservation(reservation.id)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons name="close-circle" size={20} color="#EF4444" />
+                        <Text style={styles.__cancel_reservation_text}>
+                          {t('reservations.cancel') || 'Cancel'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                    {reservation.status === 'canceled' && (
+                      <Text style={styles.__canceled_status}>
+                        {t('reservations.canceled') || 'Canceled'}
+                      </Text>
+                    )}
                   </View>
                 </View>
               ))}

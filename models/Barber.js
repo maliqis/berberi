@@ -6,8 +6,10 @@ export class Barber {
   constructor(data) {
     this.id = data.id;
     this.name = data.name;
-    this.image = data.image || null;
-    this.isOpen = data.isOpen || false;
+    // Support both 'image' and 'logoUrl' from API
+    this.image = data.image || data.logoUrl || null;
+    this.logoUrl = data.logoUrl || data.image || null;
+    this.isOpen = data.isOpen !== undefined ? data.isOpen : true;
     this.shiftStart = data.shiftStart || '09:00';
     this.shiftEnd = data.shiftEnd || '18:00';
     this.nextAvailableSlot = data.nextAvailableSlot || 0; // 0 = today, 1 = tomorrow, 2+ = in X days

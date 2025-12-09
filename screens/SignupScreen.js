@@ -10,6 +10,7 @@ import {
   Image,
   ScrollView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,9 +19,11 @@ import { useTranslation } from 'react-i18next';
 import * as ImagePicker from 'expo-image-picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import NavBar from '../components/NavBar';
+import { useAuth } from '../context/AuthContext';
 
-const SignupScreen = ({ onSignup, onNavigateToLogin, onGoBack }) => {
+const SignupScreen = ({ onNavigateToLogin, onGoBack }) => {
   const { t } = useTranslation();
+  const { signup } = useAuth();
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -30,6 +33,7 @@ const SignupScreen = ({ onSignup, onNavigateToLogin, onGoBack }) => {
   const [role, setRole] = useState('user'); // 'user' or 'barber'
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   
   // Barber-specific fields
   const [shopName, setShopName] = useState('');
@@ -95,14 +99,26 @@ const SignupScreen = ({ onSignup, onNavigateToLogin, onGoBack }) => {
     return `${hours}:${minutes}`;
   };
 
-  const handleSignup = () => {
+  const handleSignup = async () => {
     // Basic validation
-    if (!firstName || !lastName || !phoneNumber || !email || !password || password !== confirmPassword) {
+    if (!firstName || !lastName || !phoneNumber || !email || !password) {
+      Alert.alert(
+        t('signup.errorTitle') || 'Error',
+        t('signup.fillAllFields') || 'Please fill in all required fields'
+      );
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      Alert.alert(
+        t('signup.errorTitle') || 'Error',
+        t('signup.passwordsDontMatch') || 'Passwords do not match'
+      );
       return;
     }
 
     // Barber-specific validation
-    if (role === 'barber') {
+    if (role === 'barber' || role === 'barberAdmin') {
       if (!shopName.trim()) {
         Alert.alert(
           t('signup.errorTitle') || 'Error',
@@ -127,25 +143,36 @@ const SignupScreen = ({ onSignup, onNavigateToLogin, onGoBack }) => {
       }
     }
 
-    const userData = {
-      firstName,
-      lastName,
-      phoneNumber,
-      name: `${firstName} ${lastName}`,
-      email,
-      role,
-    };
+    setIsLoading(true);
+    try {
+      const userData = {
+        firstName,
+        lastName,
+        phoneNumber,
+        email,
+        password,
+        role: role === 'barber' ? 'barberAdmin' : 'user', // Backend expects 'barberAdmin'
+      };
 
-    if (role === 'barber') {
-      userData.shopName = shopName.trim();
-      userData.logo = logo;
-      userData.workingDays = workingDays.sort();
-      userData.shiftStart = formatTime(shiftStart);
-      userData.shiftEnd = formatTime(shiftEnd);
-      userData.slotLengthMinutes = slotLengthMinutes;
+      if (role === 'barber' || role === 'barberAdmin') {
+        userData.shopName = shopName.trim();
+        userData.logo = logo;
+        userData.workingDays = workingDays.sort();
+        userData.shiftStart = formatTime(shiftStart);
+        userData.shiftEnd = formatTime(shiftEnd);
+        userData.slotLengthMinutes = slotLengthMinutes;
+      }
+
+      await signup(userData);
+      // Navigation will be handled by App.js based on user role
+    } catch (error) {
+      Alert.alert(
+        t('signup.errorTitle') || 'Signup Failed',
+        error.message || t('signup.signupError') || 'Failed to create account. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
     }
-
-    onSignup(userData);
   };
 
   return (
@@ -490,9 +517,10 @@ const SignupScreen = ({ onSignup, onNavigateToLogin, onGoBack }) => {
             )}
 
             <TouchableOpacity
-              style={styles.__signup_button}
+              style={[styles.__signup_button, isLoading && styles.__signup_button_disabled]}
               onPress={handleSignup}
               activeOpacity={0.9}
+              disabled={isLoading}
             >
               <LinearGradient
                 colors={['#FFD700', '#FFA500']}
@@ -500,7 +528,11 @@ const SignupScreen = ({ onSignup, onNavigateToLogin, onGoBack }) => {
                 start={{ x: 0, y: 0 }}
                 end={{ x: 1, y: 0 }}
               >
-                <Text style={styles.__signup_button_text}>{t('signup.signupButton')}</Text>
+                {isLoading ? (
+                  <ActivityIndicator color="#1a1a2e" />
+                ) : (
+                  <Text style={styles.__signup_button_text}>{t('signup.signupButton')}</Text>
+                )}
               </LinearGradient>
               <View style={styles.__button_shadow} />
             </TouchableOpacity>
@@ -712,6 +744,9 @@ const styles = StyleSheet.create({
     fontFamily: 'Poppins_700Bold',
     color: '#1a1a2e',
     letterSpacing: 0.5,
+  },
+  __signup_button_disabled: {
+    opacity: 0.6,
   },
   __login_link: {
     alignItems: 'center',

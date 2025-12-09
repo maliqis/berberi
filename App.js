@@ -28,13 +28,21 @@ const AuthNavigator = () => {
   const { user, login, signup, loading } = useAuth();
   const navigationRef = React.useRef(null);
 
-  // Protect MainTabs route - redirect to Landing if user logs out
-  // This hook must be called before any early returns to maintain hook order
+  // Handle navigation based on auth state
   React.useEffect(() => {
-    if (!loading && !user && navigationRef.current?.isReady()) {
+    if (!loading && navigationRef.current?.isReady()) {
       const currentRoute = navigationRef.current.getCurrentRoute();
-      if (currentRoute?.name === 'MainTabs') {
-        navigationRef.current.replace('Landing');
+      
+      if (user) {
+        // User is logged in - navigate to MainTabs if not already there
+        if (currentRoute?.name !== 'MainTabs') {
+          navigationRef.current.replace('MainTabs');
+        }
+      } else {
+        // User is logged out - navigate to Landing if on protected route
+        if (currentRoute?.name === 'MainTabs') {
+          navigationRef.current.replace('Landing');
+        }
       }
     }
   }, [user, loading]);
@@ -67,11 +75,6 @@ const AuthNavigator = () => {
         <Stack.Screen name="Login">
           {({ navigation }) => (
             <LoginScreen
-              onLogin={async (userData) => {
-                await login(userData);
-                // Navigation will be handled by TabNavigator based on favorite barber
-                navigation.replace('MainTabs');
-              }}
               onNavigateToSignup={() => navigation.navigate('Signup')}
               onNavigateToForgotPassword={() => navigation.navigate('ForgotPassword')}
               onGoBack={() => navigation.replace('Landing')}
@@ -89,11 +92,6 @@ const AuthNavigator = () => {
         <Stack.Screen name="Signup">
           {({ navigation }) => (
             <SignupScreen
-              onSignup={async (userData) => {
-                await signup(userData);
-                // Navigation will be handled by TabNavigator based on favorite barber
-                navigation.replace('MainTabs');
-              }}
               onNavigateToLogin={() => navigation.navigate('Login')}
               onGoBack={() => navigation.replace('Landing')}
             />

@@ -10,100 +10,52 @@ import {
   Modal,
   Animated,
   TextInput,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/AuthContext';
 import NavBar from '../components/NavBar';
+import barberService from '../services/barberService';
+import employeeService from '../services/employeeService';
+import availabilityService from '../services/availabilityService';
+import reservationService from '../services/reservationService';
+import favoriteService from '../services/favoriteService';
 
-// Mock data for favorite barber shop
-const myBarberShop = {
-  id: '1',
-  name: 'Classic Cuts',
-  image: 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400',
+// Helper function to format date as YYYY-MM-DD
+const formatDateForAPI = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 };
 
-// Mock data for barbers (employees) in the shop
-const barbers = [
-  {
-    id: 'barber1',
-    name: 'John Smith',
-    image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=200',
-    shiftStart: '09:00',
-    shiftEnd: '17:00',
-    slotLengthMinutes: 60, // Appointment duration in minutes
-  },
-  {
-    id: 'barber2',
-    name: 'Mike Johnson',
-    image: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=200',
-    shiftStart: '10:00',
-    shiftEnd: '18:00',
-    slotLengthMinutes: 30, // Appointment duration in minutes
-  },
-];
-
-// Mock booked time slots per barber (these will be disabled)
-const bookedSlots = {
-  barber1: [
-    { date: new Date().toDateString(), time: '10:00' },
-    { date: new Date().toDateString(), time: '14:00' },
-    { date: new Date(Date.now() + 86400000).toDateString(), time: '11:00' },
-  ],
-  barber2: [
-    { date: new Date().toDateString(), time: '12:00' },
-    { date: new Date().toDateString(), time: '16:00' },
-    { date: new Date(Date.now() + 86400000).toDateString(), time: '15:00' },
-  ],
-};
-
-// Generate time slots based on barber's shift and slot length
-const generateTimeSlots = (barber) => {
-  if (!barber) {
-    // Auto Select - generate all possible slots from all barbers
-    const allSlots = new Set();
-    barbers.forEach(b => {
-      const slots = generateTimeSlotsForBarber(b);
-      slots.forEach(slot => allSlots.add(slot));
-    });
-    return Array.from(allSlots).sort();
+// Generate time slots from availability data
+const generateTimeSlotsFromAvailability = (availability, employees, selectedBarberId) => {
+  if (!availability || availability.length === 0) {
+    return [];
   }
-  
-  return generateTimeSlotsForBarber(barber);
-};
 
-// Helper function to generate slots for a specific barber
-const generateTimeSlotsForBarber = (barber) => {
-  const slots = [];
-  const startHour = parseInt(barber.shiftStart.split(':')[0]);
-  const startMinute = parseInt(barber.shiftStart.split(':')[1]) || 0;
-  const endHour = parseInt(barber.shiftEnd.split(':')[0]);
-  const endMinute = parseInt(barber.shiftEnd.split(':')[1]) || 0;
-  const slotLengthMinutes = barber.slotLengthMinutes || 60;
-  
-  // Convert to minutes for easier calculation
-  const startTotalMinutes = startHour * 60 + startMinute;
-  const endTotalMinutes = endHour * 60 + endMinute;
-  
-  // Generate slots: start from shift start, increment by slot length
-  // Last slot must end before or at shift end
-  let currentMinutes = startTotalMinutes;
-  
-  while (currentMinutes + slotLengthMinutes <= endTotalMinutes) {
-    const hour = Math.floor(currentMinutes / 60);
-    const minute = currentMinutes % 60;
-    const time = `${hour.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
-    slots.push(time);
-    currentMinutes += slotLengthMinutes;
+  // Filter by selected barber if specified
+  let filteredAvailability = availability;
+  if (selectedBarberId) {
+    filteredAvailability = availability.filter(slot => slot.barberId === selectedBarberId);
   }
-  
-  return slots;
+
+  // Extract unique times and sort
+  const timeSlots = filteredAvailability
+    .map(slot => slot.time)
+    .filter((time, index, self) => self.indexOf(time) === index)
+    .sort();
+
+  return timeSlots;
 };
 
 const MyBarberScreen = () => {
@@ -111,6 +63,9 @@ const MyBarberScreen = () => {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { logout, user } = useAuth();
+  const [shop, setShop] = useState(null);
+  const [employees, setEmployees] = useState([]);
+  const [availability, setAvailability] = useState([]);
   const [selectedBarber, setSelectedBarber] = useState(null); // null = Auto Select
   const [showBarberDropdown, setShowBarberDropdown] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
@@ -122,30 +77,105 @@ const MyBarberScreen = () => {
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [comment, setComment] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingAvailability, setIsLoadingAvailability] = useState(false);
   
-  // Load stored barber employee ID on mount
+  // Load favorite shop and employees
+  const loadShopData = async () => {
+    try {
+      setIsLoading(true);
+      
+      // Get favorite shop from API
+      const favorites = await favoriteService.getFavorites();
+      let shopId = null;
+      
+      if (favorites && favorites.length > 0) {
+        shopId = favorites[0].shopId;
+      } else {
+        // Fallback to cached local storage
+        const cachedShopId = await AsyncStorage.getItem('@berberi_selected_barber_id');
+        if (cachedShopId) {
+          shopId = cachedShopId;
+        } else {
+          Alert.alert(
+            t('myBarber.noFavorite') || 'No Favorite Shop',
+            t('myBarber.selectFavorite') || 'Please select a barbershop from the Home screen first.'
+          );
+          navigation.navigate('Home');
+          return;
+        }
+      }
+
+      // Load shop details
+      const shopData = await barberService.getBarberById(shopId);
+      setShop(shopData);
+
+      // Load employees
+      const employeesData = await employeeService.getEmployees(shopId);
+      setEmployees(employeesData);
+
+      // Load availability for selected date
+      await loadAvailability(shopId, selectedDate, null);
+    } catch (error) {
+      console.error('Error loading shop data:', error);
+      Alert.alert(
+        t('myBarber.errorTitle') || 'Error',
+        error.message || t('myBarber.loadError') || 'Failed to load shop data. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Load availability for a specific date
+  const loadAvailability = async (shopId, date, barberId) => {
+    try {
+      setIsLoadingAvailability(true);
+      const dateString = formatDateForAPI(date);
+      const availabilityData = await availabilityService.getAvailability(shopId, dateString, barberId);
+      setAvailability(availabilityData);
+    } catch (error) {
+      console.error('Error loading availability:', error);
+      setAvailability([]);
+    } finally {
+      setIsLoadingAvailability(false);
+    }
+  };
+
+  // Load shop data on mount and when screen is focused
+  useFocusEffect(
+    React.useCallback(() => {
+      loadShopData();
+    }, [])
+  );
+
+  // Reload availability when date or selected barber changes
+  useEffect(() => {
+    if (shop?.id) {
+      loadAvailability(shop.id, selectedDate, selectedBarber);
+    }
+  }, [selectedDate, selectedBarber, shop]);
+  
+  // Load stored barber employee ID on mount (UX preference only)
   useEffect(() => {
     const loadStoredBarberEmployee = async () => {
       try {
         const storedEmployeeId = await AsyncStorage.getItem('@berberi_selected_barber_employee_id');
-        if (storedEmployeeId) {
-          // Check if the employee ID exists in the barbers array
-          const employeeExists = barbers.find(b => b.id === storedEmployeeId);
+        if (storedEmployeeId && employees.length > 0) {
+          const employeeExists = employees.find(e => e.id === storedEmployeeId);
           if (employeeExists) {
             setSelectedBarber(storedEmployeeId);
-          } else {
-            // If stored employee doesn't exist, clear it and default to Auto Select
-            await AsyncStorage.removeItem('@berberi_selected_barber_employee_id');
           }
         }
-        // If no stored employee, selectedBarber remains null (Auto Select)
       } catch (error) {
         console.error('Error loading stored barber employee:', error);
       }
     };
     
-    loadStoredBarberEmployee();
-  }, []);
+    if (employees.length > 0) {
+      loadStoredBarberEmployee();
+    }
+  }, [employees]);
   
   const handleLogoPress = () => {
     // Replace with Landing screen in parent stack navigator
@@ -168,57 +198,28 @@ const MyBarberScreen = () => {
     }
   };
   
-  const currentBarber = selectedBarber ? barbers.find(b => b.id === selectedBarber) : null;
-  const timeSlots = generateTimeSlots(currentBarber);
+  const currentBarber = selectedBarber ? employees.find(e => e.id === selectedBarber) : null;
+  const timeSlots = generateTimeSlotsFromAvailability(availability, employees, selectedBarber);
 
   const isSlotBooked = (time) => {
-    if (!selectedBarber) {
-      // Auto Select - slot is available if at least one barber has it free
-      // So it's booked only if ALL barbers have it booked
-      const dateString = selectedDate.toDateString();
-      
-      // Check if the time is within at least one barber's shift
-      // and if there's enough time for an appointment
-      const isWithinAnyShift = barbers.some(barber => {
-        const startHour = parseInt(barber.shiftStart.split(':')[0]);
-        const startMinute = parseInt(barber.shiftStart.split(':')[1]) || 0;
-        const endHour = parseInt(barber.shiftEnd.split(':')[0]);
-        const endMinute = parseInt(barber.shiftEnd.split(':')[1]) || 0;
-        const slotLengthMinutes = barber.slotLengthMinutes || 60;
-        
-        const timeHour = parseInt(time.split(':')[0]);
-        const timeMinute = parseInt(time.split(':')[1]) || 0;
-        
-        const startTotalMinutes = startHour * 60 + startMinute;
-        const endTotalMinutes = endHour * 60 + endMinute;
-        const timeTotalMinutes = timeHour * 60 + timeMinute;
-        
-        // Check if time is within shift and there's enough time for the appointment
-        return timeTotalMinutes >= startTotalMinutes && 
-               timeTotalMinutes + slotLengthMinutes <= endTotalMinutes;
-      });
-      
-      if (!isWithinAnyShift) {
-        return true; // Time is outside all barbers' shifts
-      }
-      
-      // Check if ALL barbers have this slot booked
-      const allBarbersBooked = barbers.every(barber => {
-        const barberBookedSlots = bookedSlots[barber.id] || [];
-        return barberBookedSlots.some(
-          (slot) => slot.date === dateString && slot.time === time
-        );
-      });
-      
-      return allBarbersBooked;
+    if (!availability || availability.length === 0) {
+      return true; // No availability data means slot is not available
     }
+
+    // Find the slot in availability data
+    const slot = availability.find(s => s.time === time);
     
-    // Specific barber selected - check if this barber has it booked
-    const barberBookedSlots = bookedSlots[selectedBarber] || [];
-    return barberBookedSlots.some(
-      (slot) =>
-        slot.date === selectedDate.toDateString() && slot.time === time
-    );
+    if (!slot) {
+      return true; // Slot not in availability means it's not available
+    }
+
+    // If specific barber is selected, check if this slot is for that barber
+    if (selectedBarber) {
+      return slot.barberId !== selectedBarber || !slot.isAvailable;
+    }
+
+    // Auto Select - slot is available if at least one barber has it available
+    return !slot.isAvailable;
   };
 
   const onDateChange = (event, date) => {
@@ -274,12 +275,37 @@ const MyBarberScreen = () => {
 
       {/* Body */}
       <View style={[styles.__body, { paddingLeft: Math.max(insets.left, 20), paddingRight: Math.max(insets.right, 20) }]}>
+        {isLoading ? (
+          <View style={styles.__loading_container}>
+            <ActivityIndicator size="large" color="#FFD700" />
+            <Text style={styles.__loading_text}>
+              {t('myBarber.loading') || 'Loading shop information...'}
+            </Text>
+          </View>
+        ) : !shop ? (
+          <View style={styles.__error_container}>
+            <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
+            <Text style={styles.__error_text}>
+              {t('myBarber.noShop') || 'No shop selected. Please select a barbershop from the Home screen.'}
+            </Text>
+            <TouchableOpacity
+              style={styles.__retry_button}
+              onPress={() => navigation.navigate('Home')}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.__retry_button_text}>
+                {t('myBarber.goToHome') || 'Go to Home'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
         <View style={styles.__barber_info_card_wrapper}>
           <View style={styles.__barber_info_card}>
             <View style={styles.__barber_header}>
               <Ionicons name="heart" size={20} color="#FFD700" />
               <View style={styles.__barber_name_container}>
-                <Text style={styles.__barber_name}>{myBarberShop.name}</Text>
+                <Text style={styles.__barber_name}>{shop?.name || t('myBarber.loading') || 'Loading...'}</Text>
               </View>
               {currentBarber ? (
                 <Text style={styles.__barber_hours_inline}>
@@ -287,21 +313,7 @@ const MyBarberScreen = () => {
                 </Text>
               ) : (
                 <Text style={styles.__barber_hours_inline}>
-                  {(() => {
-                    const startTimes = barbers.map(b => b.shiftStart.split(':').map(Number));
-                    const endTimes = barbers.map(b => b.shiftEnd.split(':').map(Number));
-                    const earliestStart = startTimes.reduce((earliest, current) => {
-                      const earliestMinutes = earliest[0] * 60 + earliest[1];
-                      const currentMinutes = current[0] * 60 + current[1];
-                      return currentMinutes < earliestMinutes ? current : earliest;
-                    });
-                    const latestEnd = endTimes.reduce((latest, current) => {
-                      const latestMinutes = latest[0] * 60 + latest[1];
-                      const currentMinutes = current[0] * 60 + current[1];
-                      return currentMinutes > latestMinutes ? current : latest;
-                    });
-                    return `${earliestStart[0].toString().padStart(2, '0')}:${earliestStart[1].toString().padStart(2, '0')} - ${latestEnd[0].toString().padStart(2, '0')}:${latestEnd[1].toString().padStart(2, '0')}`;
-                  })()}
+                  {shop ? `${shop.shiftStart} - ${shop.shiftEnd}` : ''}
                 </Text>
               )}
             </View>
@@ -328,12 +340,18 @@ const MyBarberScreen = () => {
           >
             {selectedBarber ? (
               <>
-                <Image
-                  source={{ uri: currentBarber.image }}
-                  style={styles.__barber_dropdown_image}
-                />
+                {currentBarber?.avatarUrl || currentBarber?.image ? (
+                  <Image
+                    source={{ uri: currentBarber.avatarUrl || currentBarber.image }}
+                    style={styles.__barber_dropdown_image}
+                  />
+                ) : (
+                  <View style={[styles.__barber_dropdown_image, styles.__barber_dropdown_image_placeholder]}>
+                    <Ionicons name="person" size={20} color="#FFD700" />
+                  </View>
+                )}
                 <Text style={styles.__barber_dropdown_text}>
-                  {currentBarber.name}
+                  {currentBarber?.name || ''}
                 </Text>
               </>
             ) : (
@@ -392,40 +410,46 @@ const MyBarberScreen = () => {
                   )}
                 </TouchableOpacity>
 
-                {barbers.map((barber) => (
+                {employees.map((employee) => (
                   <TouchableOpacity
-                    key={barber.id}
+                    key={employee.id}
                     style={[
                       styles.__dropdown_item,
-                      selectedBarber === barber.id &&
+                      selectedBarber === employee.id &&
                         styles.__dropdown_item_selected,
                     ]}
                     onPress={async () => {
-                      setSelectedBarber(barber.id);
+                      setSelectedBarber(employee.id);
                       setShowBarberDropdown(false);
                       setSelectedTime(null);
-                      // Save selected employee to storage
+                      // Save selected employee to storage (UX preference only)
                       try {
-                        await AsyncStorage.setItem('@berberi_selected_barber_employee_id', barber.id);
+                        await AsyncStorage.setItem('@berberi_selected_barber_employee_id', employee.id);
                       } catch (error) {
                         console.error('Error saving barber employee selection:', error);
                       }
                     }}
                   >
-                    <Image
-                      source={{ uri: barber.image }}
-                      style={styles.__dropdown_item_image}
-                    />
+                    {employee.avatarUrl || employee.image ? (
+                      <Image
+                        source={{ uri: employee.avatarUrl || employee.image }}
+                        style={styles.__dropdown_item_image}
+                      />
+                    ) : (
+                      <View style={[styles.__dropdown_item_image, styles.__dropdown_item_image_placeholder]}>
+                        <Ionicons name="person" size={20} color="#FFD700" />
+                      </View>
+                    )}
                     <Text
                       style={[
                         styles.__dropdown_item_text,
-                        selectedBarber === barber.id &&
+                        selectedBarber === employee.id &&
                           styles.__dropdown_item_text_selected,
                       ]}
                     >
-                      {barber.name}
+                      {employee.name}
                     </Text>
-                    {selectedBarber === barber.id && (
+                    {selectedBarber === employee.id && (
                       <Ionicons name="checkmark" size={20} color="#FFD700" />
                     )}
                   </TouchableOpacity>
@@ -464,49 +488,64 @@ const MyBarberScreen = () => {
         {/* Time Picker Section */}
         <View style={styles.__section}>
           <Text style={styles.__section_title}>{t('myBarber.selectTime')}</Text>
-          <View style={styles.__time_slots_container}>
-            {timeSlots.map((time) => {
-              const isBooked = isSlotBooked(time);
-              const isSelected = selectedTime === time;
+          {isLoadingAvailability ? (
+            <View style={styles.__loading_time_slots}>
+              <ActivityIndicator size="small" color="#FFD700" />
+              <Text style={styles.__loading_time_slots_text}>
+                {t('myBarber.loadingAvailability') || 'Loading availability...'}
+              </Text>
+            </View>
+          ) : timeSlots.length === 0 ? (
+            <View style={styles.__empty_time_slots}>
+              <Text style={styles.__empty_time_slots_text}>
+                {t('myBarber.noAvailableSlots') || 'No available time slots for this date'}
+              </Text>
+            </View>
+          ) : (
+            <View style={styles.__time_slots_container}>
+              {timeSlots.map((time) => {
+                const isBooked = isSlotBooked(time);
+                const isSelected = selectedTime === time;
 
-              return (
-                <TouchableOpacity
-                  key={time}
-                  style={[
-                    styles.__time_slot,
-                    isSelected && styles.__time_slot_selected,
-                    isBooked && styles.__time_slot_disabled,
-                  ]}
-                  onPress={() => {
-                    if (!isBooked) {
-                      // Toggle: if already selected, unselect; otherwise select
-                      setSelectedTime(isSelected ? null : time);
-                    }
-                  }}
-                  disabled={isBooked}
-                  activeOpacity={0.7}
-                >
-                  {isBooked && (
-                    <Ionicons
-                      name="lock-closed"
-                      size={16}
-                      color="rgba(255, 215, 0, 0.6)"
-                      style={styles.__lock_icon}
-                    />
-                  )}
-                  <Text
+                return (
+                  <TouchableOpacity
+                    key={time}
                     style={[
-                      styles.__time_slot_text,
-                      isSelected && styles.__time_slot_text_selected,
-                      isBooked && styles.__time_slot_text_disabled,
+                      styles.__time_slot,
+                      isSelected && styles.__time_slot_selected,
+                      isBooked && styles.__time_slot_disabled,
                     ]}
+                    onPress={() => {
+                      if (!isBooked) {
+                        // Toggle: if already selected, unselect; otherwise select
+                        setSelectedTime(isSelected ? null : time);
+                      }
+                    }}
+                    disabled={isBooked}
+                    activeOpacity={0.7}
                   >
-                    {time}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+                    {isBooked && (
+                      <Ionicons
+                        name="lock-closed"
+                        size={16}
+                        color="rgba(255, 215, 0, 0.6)"
+                        style={styles.__lock_icon}
+                      />
+                    )}
+                    <Text
+                      style={[
+                        styles.__time_slot_text,
+                        isSelected && styles.__time_slot_text_selected,
+                        isBooked && styles.__time_slot_text_disabled,
+                      ]}
+                    >
+                      {time}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          )}
         </View>
 
         {/* Customer Information Section */}
@@ -561,67 +600,37 @@ const MyBarberScreen = () => {
             style={styles.__book_button}
             activeOpacity={0.8}
             onPress={async () => {
-              // Save reservation
-              try {
-                // If auto-select, find which barber actually has this time slot available (not booked)
-                let actualBarber = currentBarber;
-                if (!selectedBarber && selectedTime) {
-                  const dateString = selectedDate.toDateString();
-                  // Find the first barber who has this time slot available (within shift and not booked)
-                  actualBarber = barbers.find(barber => {
-                    // Check if time is within barber's shift
-                    const startHour = parseInt(barber.shiftStart.split(':')[0]);
-                    const startMinute = parseInt(barber.shiftStart.split(':')[1]) || 0;
-                    const endHour = parseInt(barber.shiftEnd.split(':')[0]);
-                    const endMinute = parseInt(barber.shiftEnd.split(':')[1]) || 0;
-                    const slotLengthMinutes = barber.slotLengthMinutes || 60;
-                    
-                    const timeHour = parseInt(selectedTime.split(':')[0]);
-                    const timeMinute = parseInt(selectedTime.split(':')[1]) || 0;
-                    
-                    const startTotalMinutes = startHour * 60 + startMinute;
-                    const endTotalMinutes = endHour * 60 + endMinute;
-                    const timeTotalMinutes = timeHour * 60 + timeMinute;
-                    
-                    // Check if time is within shift and there's enough time for the appointment
-                    const isWithinShift = timeTotalMinutes >= startTotalMinutes && 
-                                         timeTotalMinutes + slotLengthMinutes <= endTotalMinutes;
-                    
-                    if (!isWithinShift) return false;
-                    
-                    // Check if this slot is not booked for this barber
-                    const barberBookedSlots = bookedSlots[barber.id] || [];
-                    const isBooked = barberBookedSlots.some(
-                      (slot) => slot.date === dateString && slot.time === selectedTime
-                    );
-                    
-                    return !isBooked; // Return true if not booked
-                  });
-                }
+              if (!shop || !selectedTime) {
+                return;
+              }
 
-                const reservation = {
-                  barberName: actualBarber ? actualBarber.name : t('myBarber.autoSelect'),
-                  shopName: myBarberShop.name,
-                  barberImage: actualBarber ? actualBarber.image : null,
-                  date: selectedDate.toISOString(),
+              try {
+                // Create reservation via API
+                const reservationData = {
+                  shopId: shop.id,
+                  date: formatDateForAPI(selectedDate), // Use YYYY-MM-DD format, not ISO string
                   time: selectedTime,
-                  barberId: actualBarber ? actualBarber.id : null,
-                  firstName: firstName.trim() || user?.firstName || (user?.name?.split(' ')[0] || ''),
-                  lastName: lastName.trim() || user?.lastName || (user?.name?.split(' ').slice(1).join(' ') || ''),
-                  customerId: user?.email || null,
                   comment: comment.trim() || '',
                   clientNumber: user?.phoneNumber || '',
                 };
 
-                // Load existing reservations
-                const existingReservations = await AsyncStorage.getItem('@berberi_reservations');
-                const reservations = existingReservations ? JSON.parse(existingReservations) : [];
-                
-                // Add new reservation
-                reservations.push(reservation);
-                
-                // Save back to storage
-                await AsyncStorage.setItem('@berberi_reservations', JSON.stringify(reservations));
+                // firstName and lastName are optional - only include if provided
+                // API contract: if omitted, uses user's name from authenticated user
+                const firstNameValue = firstName.trim() || user?.firstName;
+                const lastNameValue = lastName.trim() || user?.lastName;
+                if (firstNameValue) {
+                  reservationData.firstName = firstNameValue;
+                }
+                if (lastNameValue) {
+                  reservationData.lastName = lastNameValue;
+                }
+
+                // Include barberId only if specific barber is selected (omit for auto-assign)
+                if (selectedBarber) {
+                  reservationData.barberId = selectedBarber;
+                }
+
+                await reservationService.createReservation(reservationData);
 
                 // Show success animation
                 setShowSuccessAnimation(true);
@@ -639,6 +648,11 @@ const MyBarberScreen = () => {
                   }),
                 ]).start();
 
+                // Reload availability to reflect the new booking
+                if (shop?.id) {
+                  await loadAvailability(shop.id, selectedDate, selectedBarber);
+                }
+
                 // After animation, navigate to reservations
                 setTimeout(() => {
                   setShowSuccessAnimation(false);
@@ -647,9 +661,16 @@ const MyBarberScreen = () => {
                   navigation.navigate('MyReservations');
                   // Reset selection
                   setSelectedTime(null);
+                  setFirstName('');
+                  setLastName('');
+                  setComment('');
                 }, 2000);
               } catch (error) {
-                console.error('Error saving reservation:', error);
+                console.error('Error creating reservation:', error);
+                Alert.alert(
+                  t('myBarber.errorTitle') || 'Booking Failed',
+                  error.message || t('myBarber.bookingError') || 'Failed to create reservation. Please try again.'
+                );
               }
             }}
           >
@@ -693,6 +714,8 @@ const MyBarberScreen = () => {
           </View>
         </Modal>
       )}
+          </>
+        )}
       </View>
     </LinearGradient>
   );
@@ -1032,6 +1055,77 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 6,
     right: 6,
+  },
+  __loading_container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+  },
+  __loading_text: {
+    marginTop: 16,
+    fontSize: 16,
+    fontFamily: 'Poppins_400Regular',
+    color: 'rgba(255, 255, 255, 0.8)',
+  },
+  __error_container: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 20,
+  },
+  __error_text: {
+    marginTop: 16,
+    fontSize: 16,
+    fontFamily: 'Poppins_400Regular',
+    color: '#EF4444',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  __retry_button: {
+    backgroundColor: 'rgba(255, 215, 0, 0.2)',
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  __retry_button_text: {
+    fontSize: 16,
+    fontFamily: 'Poppins_600SemiBold',
+    color: '#FFD700',
+  },
+  __loading_time_slots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 12,
+  },
+  __loading_time_slots_text: {
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+    color: 'rgba(255, 255, 255, 0.6)',
+  },
+  __empty_time_slots: {
+    paddingVertical: 20,
+    alignItems: 'center',
+  },
+  __empty_time_slots_text: {
+    fontSize: 14,
+    fontFamily: 'Poppins_400Regular',
+    color: 'rgba(255, 255, 255, 0.6)',
+  },
+  __dropdown_item_image_placeholder: {
+    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  __barber_dropdown_image_placeholder: {
+    backgroundColor: 'rgba(255, 215, 0, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   __fixed_button_container: {
     position: 'absolute',

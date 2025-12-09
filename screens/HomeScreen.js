@@ -9,67 +9,21 @@ import {
   TouchableOpacity,
   Dimensions,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { StatusBar } from 'expo-status-bar';
 import { useTranslation } from 'react-i18next';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation, useRoute, useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useAuth } from '../context/AuthContext';
 import NavBar from '../components/NavBar';
+import barberService from '../services/barberService';
+import favoriteService from '../services/favoriteService';
 
 const { width } = Dimensions.get('window');
-
-// Mock barber data (temporary - will be replaced with API)
-const mockBarbers = [
-  {
-    id: '1',
-    name: 'Classic Cuts',
-    image: 'https://images.unsplash.com/photo-1585747860715-2ba37e788b70?w=400',
-    isOpen: true,
-    shiftStart: '09:00',
-    shiftEnd: '18:00',
-    nextAvailableSlot: 0, // 0 = today, 1 = tomorrow, 2+ = in X days
-  },
-  {
-    id: '2',
-    name: 'Elite Barbershop',
-    image: 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?w=400',
-    isOpen: true,
-    shiftStart: '08:00',
-    shiftEnd: '20:00',
-    nextAvailableSlot: 1, // tomorrow
-  },
-  {
-    id: '3',
-    name: 'Modern Style',
-    image: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?w=400',
-    isOpen: false,
-    shiftStart: '10:00',
-    shiftEnd: '19:00',
-    nextAvailableSlot: 3, // in 3 days
-  },
-  {
-    id: '4',
-    name: 'The Gentleman\'s Cut',
-    image: 'https://images.unsplash.com/photo-1516975080664-ed2fc6a72937?w=400',
-    isOpen: true,
-    shiftStart: '07:00',
-    shiftEnd: '17:00',
-    nextAvailableSlot: 0, // today
-  },
-  {
-    id: '5',
-    name: 'Urban Barbers',
-    image: 'https://images.unsplash.com/photo-1621605815971-fbc98d665033?w=400',
-    isOpen: false,
-    shiftStart: '09:30',
-    shiftEnd: '18:30',
-    nextAvailableSlot: 2, // in 2 days
-  },
-];
 
 const getFreeSlotsLabel = (days, t) => {
   if (days === 0) return t('home.freeSlotsToday');
@@ -209,25 +163,46 @@ const HomeScreen = () => {
   const { logout } = useAuth();
   const flatListRef = useRef(null);
   const [searchQuery, setSearchQuery] = useState('');
-  const [filteredBarbers, setFilteredBarbers] = useState(mockBarbers);
+  const [barbers, setBarbers] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [isSearching, setIsSearching] = useState(false);
+  const [error, setError] = useState(null);
+  
+  // Load barbers on mount and when screen is focused
+  const loadBarbers = async (search = '') => {
+    try {
+      setIsSearching(search.trim() !== '');
+      setError(null);
+      
+      const params = search.trim() ? { search: search.trim() } : {};
+      const fetchedBarbers = await barberService.getAllBarbers(params);
+      setBarbers(fetchedBarbers);
+    } catch (error) {
+      console.error('Error loading barbers:', error);
+      setError(error.message || 'Failed to load barbershops');
+      // Show error alert
+      Alert.alert(
+        t('home.errorTitle') || 'Error',
+        error.message || t('home.loadError') || 'Failed to load barbershops. Please try again.'
+      );
+    } finally {
+      setIsLoading(false);
+      setIsSearching(false);
+    }
+  };
+
+  // Initial load
+  useFocusEffect(
+    React.useCallback(() => {
+      setIsLoading(true);
+      loadBarbers();
+    }, [])
+  );
   
   // Debounce search - wait 1 second after user stops typing
   useEffect(() => {
-    if (searchQuery.trim() !== '') {
-      setIsSearching(true);
-    }
-    
     const timeoutId = setTimeout(() => {
-      if (searchQuery.trim() === '') {
-        setFilteredBarbers(mockBarbers);
-      } else {
-        const filtered = mockBarbers.filter(barber =>
-          barber.name.toLowerCase().includes(searchQuery.toLowerCase())
-        );
-        setFilteredBarbers(filtered);
-      }
-      setIsSearching(false);
+      loadBarbers(searchQuery);
     }, 1000);
 
     return () => clearTimeout(timeoutId);
@@ -256,12 +231,23 @@ const HomeScreen = () => {
 
   const handleOpenBarber = async (barberId) => {
     try {
-      // Save barber ID to local storage
+      // Save as favorite via API
+      try {
+        await favoriteService.addFavorite(barberId);
+      } catch (error) {
+        // If favorite already exists or API fails, continue anyway
+        console.warn('Could not save favorite:', error);
+      }
+      
+      // Cache locally for quick access (optional)
       await AsyncStorage.setItem('@berberi_selected_barber_id', barberId);
+      
       // Navigate to MyBarber tab
       navigation.navigate('MyBarber');
     } catch (error) {
-      console.error('Error saving barber ID:', error);
+      console.error('Error opening barber:', error);
+      // Still navigate even if favorite save fails
+      navigation.navigate('MyBarber');
     }
   };
   
@@ -310,14 +296,44 @@ const HomeScreen = () => {
           </View>
         </View>
 
-        <FlatList
-          ref={flatListRef}
-          data={filteredBarbers}
-          renderItem={({ item }) => <BarberCard barber={item} t={t} onOpenPress={handleOpenBarber} />}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.__list_container}
-          showsVerticalScrollIndicator={false}
-        />
+        {isLoading && barbers.length === 0 ? (
+          <View style={styles.__loading_container}>
+            <ActivityIndicator size="large" color="#FFD700" />
+            <Text style={styles.__loading_text}>{t('home.loading') || 'Loading barbershops...'}</Text>
+          </View>
+        ) : error && barbers.length === 0 ? (
+          <View style={styles.__error_container}>
+            <Ionicons name="alert-circle-outline" size={48} color="#EF4444" />
+            <Text style={styles.__error_text}>{error}</Text>
+            <TouchableOpacity
+              style={styles.__retry_button}
+              onPress={() => loadBarbers(searchQuery)}
+              activeOpacity={0.8}
+            >
+              <Text style={styles.__retry_button_text}>{t('home.retry') || 'Retry'}</Text>
+            </TouchableOpacity>
+          </View>
+        ) : barbers.length === 0 ? (
+          <View style={styles.__empty_container}>
+            <Ionicons name="search-outline" size={48} color="rgba(255, 215, 0, 0.5)" />
+            <Text style={styles.__empty_text}>
+              {searchQuery.trim() 
+                ? t('home.noResults') || 'No barbershops found'
+                : t('home.noBarbershops') || 'No barbershops available'}
+            </Text>
+          </View>
+        ) : (
+          <FlatList
+            ref={flatListRef}
+            data={barbers}
+            renderItem={({ item }) => <BarberCard barber={item} t={t} onOpenPress={handleOpenBarber} />}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.__list_container}
+            showsVerticalScrollIndicator={false}
+            refreshing={isLoading && barbers.length > 0}
+            onRefresh={() => loadBarbers(searchQuery)}
+          />
+        )}
       </View>
     </LinearGradient>
   );
