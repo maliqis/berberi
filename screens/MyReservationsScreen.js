@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuth } from '../context/AuthContext';
 import NavBar from '../components/NavBar';
 import reservationService from '../services/reservationService';
-import { api } from '../services/api';
+import api from '../services/api';
 
 // Barber Avatar Component with placeholder
 const BarberAvatar = ({ imageUri, style }) => {
@@ -124,7 +124,8 @@ const MyReservationsScreen = () => {
           style: 'destructive',
           onPress: async () => {
             try {
-              await updateUser({ isActive: false });
+              // API contract: DELETE /me deactivates account (returns 204 No Content)
+              await api.delete('/me');
               Alert.alert(
                 t('profile.deactivateSuccessTitle') || 'Account Deactivated',
                 t('profile.deactivateSuccessMessage') || 'Your account has been deactivated. You will be logged out.',
@@ -146,7 +147,7 @@ const MyReservationsScreen = () => {
             } catch (error) {
               Alert.alert(
                 t('profile.errorTitle') || 'Error',
-                t('profile.deactivateError') || 'Failed to deactivate account. Please try again.'
+                error.message || t('profile.deactivateError') || 'Failed to deactivate account. Please try again.'
               );
             }
           },

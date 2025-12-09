@@ -483,11 +483,20 @@ const ScheduleTimeline = () => {
         barberId: selectedBarberForReservation,
         date: formatDateForAPI(selectedDate), // Use YYYY-MM-DD format, not ISO string
         time: selectedSlotTime,
-        firstName: firstName.trim() || 'Klienti',
-        lastName: lastName.trim() || '',
         comment: comment.trim() || '',
         clientNumber: clientNumber.trim() || '',
       };
+
+      // firstName and lastName are optional - only include if provided
+      // API contract: if omitted, uses user's name from authenticated user
+      const firstNameValue = firstName.trim();
+      const lastNameValue = lastName.trim();
+      if (firstNameValue) {
+        reservationData.firstName = firstNameValue;
+      }
+      if (lastNameValue) {
+        reservationData.lastName = lastNameValue;
+      }
 
       await reservationService.createReservation(reservationData);
       

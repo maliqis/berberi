@@ -57,11 +57,18 @@ class ReservationService {
         shopId: reservationData.shopId,
         date: reservationData.date, // Should be "YYYY-MM-DD" format (not ISO string)
         time: reservationData.time, // HH:mm format
-        firstName: reservationData.firstName,
-        lastName: reservationData.lastName,
         comment: reservationData.comment || '',
         clientNumber: reservationData.clientNumber || '',
       };
+
+      // firstName and lastName are optional - only include if provided
+      // API contract: if omitted, uses user's name from authenticated user
+      if (reservationData.firstName) {
+        payload.firstName = reservationData.firstName;
+      }
+      if (reservationData.lastName) {
+        payload.lastName = reservationData.lastName;
+      }
 
       // Include barberId only if specified (omit for auto-assign)
       if (reservationData.barberId) {

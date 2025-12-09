@@ -610,11 +610,20 @@ const MyBarberScreen = () => {
                   shopId: shop.id,
                   date: formatDateForAPI(selectedDate), // Use YYYY-MM-DD format, not ISO string
                   time: selectedTime,
-                  firstName: firstName.trim() || user?.firstName || '',
-                  lastName: lastName.trim() || user?.lastName || '',
                   comment: comment.trim() || '',
                   clientNumber: user?.phoneNumber || '',
                 };
+
+                // firstName and lastName are optional - only include if provided
+                // API contract: if omitted, uses user's name from authenticated user
+                const firstNameValue = firstName.trim() || user?.firstName;
+                const lastNameValue = lastName.trim() || user?.lastName;
+                if (firstNameValue) {
+                  reservationData.firstName = firstNameValue;
+                }
+                if (lastNameValue) {
+                  reservationData.lastName = lastNameValue;
+                }
 
                 // Include barberId only if specific barber is selected (omit for auto-assign)
                 if (selectedBarber) {
