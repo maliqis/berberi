@@ -9,54 +9,55 @@ import {
   Modal,
   Image,
   TextInput,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useTranslation } from 'react-i18next';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useFocusEffect } from '@react-navigation/native';
+import { useAuth } from '../context/AuthContext';
+import employeeService from '../services/employeeService';
+import reservationService from '../services/reservationService';
+import availabilityService from '../services/availabilityService';
+import barberService from '../services/barberService';
 
 const { width } = Dimensions.get('window');
-const RESERVATIONS_STORAGE_KEY = '@berberi_reservations';
 
-// Mock barbers data (in real app, this would come from API)
-const barbers = [
-  {
-    id: 'barber1',
-    name: 'John Smith',
-    shiftStart: '09:00',
-    shiftEnd: '17:00',
-    slotLengthMinutes: 60,
-  },
-  {
-    id: 'barber2',
-    name: 'Mike Johnson',
-    shiftStart: '10:00',
-    shiftEnd: '18:00',
-    slotLengthMinutes: 30,
-  },
-  {
-    id: 'barber3',
-    name: 'David Williams',
-    shiftStart: '08:00',
-    shiftEnd: '16:00',
-    slotLengthMinutes: 60,
-  },
-];
+// Helper to format date as YYYY-MM-DD
+const formatDateForAPI = (date) => {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
 
 // Calculate overall shift times (earliest start to latest end)
-const getOverallShift = () => {
-  const allStartTimes = barbers.map(b => timeToMinutes(b.shiftStart));
-  const allEndTimes = barbers.map(b => timeToMinutes(b.shiftEnd));
+const getOverallShift = (employees, shop) => {
+  if (!employees || employees.length === 0) {
+    // Fallback to shop shift times
+    return {
+      shiftStart: shop?.shiftStart || '09:00',
+      shiftEnd: shop?.shiftEnd || '18:00',
+      slotLengthMinutes: shop?.slotLengthMinutes || 30,
+    };
+  }
+  
+  const allStartTimes = employees.map(e => timeToMinutes(e.shiftStart || shop?.shiftStart || '09:00'));
+  const allEndTimes = employees.map(e => timeToMinutes(e.shiftEnd || shop?.shiftEnd || '18:00'));
   const earliestStart = Math.min(...allStartTimes);
   const latestEnd = Math.max(...allEndTimes);
+  
+  // Get smallest slot length
+  const slotLengths = employees.map(e => e.slotLengthMinutes || shop?.slotLengthMinutes || 30);
+  const minSlotLength = Math.min(...slotLengths);
   
   return {
     shiftStart: minutesToTime(earliestStart),
     shiftEnd: minutesToTime(latestEnd),
-    slotLengthMinutes: 30, // Use smallest slot length for granularity
+    slotLengthMinutes: minSlotLength,
   };
 };
 
@@ -74,8 +75,8 @@ const minutesToTime = (minutes) => {
 };
 
 // Generate time slots for all barbers
-const generateTimeSlots = () => {
-  const overallShift = getOverallShift();
+const generateTimeSlots = (employees, shop) => {
+  const overallShift = getOverallShift(employees, shop);
   const slots = [];
   const startMinutes = timeToMinutes(overallShift.shiftStart);
   const endMinutes = timeToMinutes(overallShift.shiftEnd);
@@ -95,6 +96,9 @@ const generateTimeSlots = () => {
 
 const ScheduleTimeline = () => {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const [shop, setShop] = useState(null);
+  const [employees, setEmployees] = useState([]);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [reservations, setReservations] = useState([]);
@@ -114,16 +118,57 @@ const ScheduleTimeline = () => {
   const [currentTimePosition, setCurrentTimePosition] = useState(null);
   const [currentSlotTime, setCurrentSlotTime] = useState(null); // Track which slot contains current time
   const [slotPositions, setSlotPositions] = useState({}); // Store Y positions of each slot
+  const [isLoading, setIsLoading] = useState(true);
   const scrollViewRef = useRef(null);
   const fullScreenScrollViewRef = useRef(null);
   const timeUpdateIntervalRef = useRef(null);
   const lastScrollPositionRef = useRef(null);
-  const timeSlots = generateTimeSlots();
   
-  // Load reservations for selected date
+  // Load shop and employees on mount
+  useFocusEffect(
+    React.useCallback(() => {
+      loadShopData();
+    }, [user])
+  );
+
+  // Load reservations when date or selected barber changes
   useEffect(() => {
-    loadReservations();
-  }, [selectedDate]);
+    if (shop?.id) {
+      loadReservations();
+    }
+  }, [selectedDate, selectedBarber, shop]);
+  
+  const loadShopData = async () => {
+    try {
+      setIsLoading(true);
+      const shopId = user?.shopId;
+      if (!shopId) {
+        Alert.alert(
+          t('schedule.errorTitle') || 'Error',
+          t('schedule.noShop') || 'No shop associated with your account.'
+        );
+        return;
+      }
+
+      // Load shop details
+      const shopData = await barberService.getBarberById(shopId);
+      setShop(shopData);
+
+      // Load employees
+      const employeesData = await employeeService.getEmployees(shopId);
+      setEmployees(employeesData);
+    } catch (error) {
+      console.error('Error loading shop data:', error);
+      Alert.alert(
+        t('schedule.errorTitle') || 'Error',
+        error.message || t('schedule.loadError') || 'Failed to load shop data.'
+      );
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const timeSlots = generateTimeSlots(employees, shop);
 
   // Helper function to scroll to current time
   const scrollToCurrentTime = useCallback((forceScroll = false) => {
@@ -187,7 +232,7 @@ const ScheduleTimeline = () => {
       }
 
       // Get overall shift
-      const overallShift = getOverallShift();
+      const overallShift = getOverallShift(employees, shop);
       const shiftStartMinutes = timeToMinutes(overallShift.shiftStart);
       const shiftEndMinutes = timeToMinutes(overallShift.shiftEnd);
       const slotLength = overallShift.slotLengthMinutes;
@@ -326,25 +371,26 @@ const ScheduleTimeline = () => {
   
   const loadReservations = async () => {
     try {
-      const stored = await AsyncStorage.getItem(RESERVATIONS_STORAGE_KEY);
-      if (stored) {
-        const allReservations = JSON.parse(stored);
-        const dateString = selectedDate.toDateString();
-        
-        // Filter reservations for selected date
-        const dayReservations = allReservations.filter(res => {
-          const resDate = new Date(res.date);
-          return resDate.toDateString() === dateString;
-        });
-        
-        console.log('Loaded reservations for', dateString, ':', dayReservations);
-        setReservations(dayReservations);
-      } else {
-        console.log('No reservations found in storage');
-        setReservations([]);
+      if (!shop?.id) return;
+
+      const dateString = formatDateForAPI(selectedDate);
+      const params = {
+        shopId: shop.id,
+        date: dateString,
+      };
+
+      if (selectedBarber) {
+        params.barberId = selectedBarber;
       }
+
+      const reservationsData = await reservationService.getReservations(params);
+      setReservations(reservationsData);
     } catch (error) {
       console.error('Error loading reservations:', error);
+      Alert.alert(
+        t('schedule.errorTitle') || 'Error',
+        error.message || t('schedule.loadReservationsError') || 'Failed to load reservations.'
+      );
       setReservations([]);
     }
   };
@@ -392,20 +438,22 @@ const ScheduleTimeline = () => {
   
   // Get available barbers for a time slot
   const getAvailableBarbers = (slotTime) => {
-    return barbers.filter(barber => {
-      // Check if barber is within their shift
+    if (!employees || employees.length === 0) return [];
+    
+    return employees.filter(employee => {
+      // Check if employee is within their shift
       const slotMinutes = timeToMinutes(slotTime);
-      const startMinutes = timeToMinutes(barber.shiftStart);
-      const endMinutes = timeToMinutes(barber.shiftEnd);
-      const slotLength = barber.slotLengthMinutes || 60;
+      const startMinutes = timeToMinutes(employee.shiftStart || shop?.shiftStart || '09:00');
+      const endMinutes = timeToMinutes(employee.shiftEnd || shop?.shiftEnd || '18:00');
+      const slotLength = employee.slotLengthMinutes || shop?.slotLengthMinutes || 60;
       
       const isWithinShift = slotMinutes >= startMinutes && 
                            slotMinutes + slotLength <= endMinutes;
       
       if (!isWithinShift) return false;
       
-      // Check if barber is not already booked
-      return isBarberAvailable(barber.id, slotTime);
+      // Check if employee is not already booked
+      return isBarberAvailable(employee.id, slotTime);
     });
   };
   
@@ -426,34 +474,21 @@ const ScheduleTimeline = () => {
   };
   
   const handleSaveReservation = async () => {
-    if (!selectedBarberForReservation || !selectedSlotTime) return;
+    if (!selectedBarberForReservation || !selectedSlotTime || !shop?.id) return;
     
     try {
-      const barber = barbers.find(b => b.id === selectedBarberForReservation);
-      if (!barber) return;
-      
-      const reservation = {
-        barberName: barber.name,
-        shopName: 'Barber Shop', // You can update this if needed
-        barberImage: null,
+      const reservationData = {
+        shopId: shop.id,
+        barberId: selectedBarberForReservation,
         date: selectedDate.toISOString(),
         time: selectedSlotTime,
-        barberId: barber.id,
         firstName: firstName.trim() || 'Klienti',
-        lastName: '',
-        customerId: null,
-        comment: '',
+        lastName: lastName.trim() || '',
+        comment: comment.trim() || '',
+        clientNumber: clientNumber.trim() || '',
       };
-      
-      // Load existing reservations
-      const stored = await AsyncStorage.getItem(RESERVATIONS_STORAGE_KEY);
-      const allReservations = stored ? JSON.parse(stored) : [];
-      
-      // Add new reservation
-      allReservations.push(reservation);
-      
-      // Save back to storage
-      await AsyncStorage.setItem(RESERVATIONS_STORAGE_KEY, JSON.stringify(allReservations));
+
+      await reservationService.createReservation(reservationData);
       
       // Reload reservations
       await loadReservations();
@@ -463,8 +498,15 @@ const ScheduleTimeline = () => {
       setSelectedSlotTime(null);
       setSelectedBarberForReservation(null);
       setFirstName('');
+      setLastName('');
+      setComment('');
+      setClientNumber('');
     } catch (error) {
       console.error('Error saving reservation:', error);
+      Alert.alert(
+        t('schedule.errorTitle') || 'Error',
+        error.message || t('schedule.saveReservationError') || 'Failed to save reservation.'
+      );
     }
   };
 
@@ -483,7 +525,7 @@ const ScheduleTimeline = () => {
               >
                 <Ionicons name="person-outline" size={18} color="#FFD700" />
                 <Text style={styles.__barber_selector_text} numberOfLines={1}>
-                  {selectedBarber ? barbers.find(b => b.id === selectedBarber)?.name || 'Barber' : 'Default'}
+                  {selectedBarber ? employees.find(e => e.id === selectedBarber)?.name || 'Barber' : 'Default'}
                 </Text>
                 <Ionicons name="chevron-down" size={18} color="#FFD700" />
               </TouchableOpacity>
@@ -582,27 +624,27 @@ const ScheduleTimeline = () => {
               )}
             </TouchableOpacity>
 
-            {barbers.map((barber) => (
+            {employees.map((employee) => (
               <TouchableOpacity
-                key={barber.id}
+                key={employee.id}
                 style={[
                   styles.__dropdown_item,
-                  selectedBarber === barber.id && styles.__dropdown_item_selected,
+                  selectedBarber === employee.id && styles.__dropdown_item_selected,
                 ]}
                 onPress={() => {
-                  setSelectedBarber(barber.id);
+                  setSelectedBarber(employee.id);
                   setShowBarberDropdown(false);
                 }}
               >
                 <Text
                   style={[
                     styles.__dropdown_item_text,
-                    selectedBarber === barber.id && styles.__dropdown_item_text_selected,
+                    selectedBarber === employee.id && styles.__dropdown_item_text_selected,
                   ]}
                 >
-                  {barber.name}
+                  {employee.name}
                 </Text>
-                {selectedBarber === barber.id && (
+                {selectedBarber === employee.id && (
                   <Ionicons name="checkmark" size={20} color="#FFD700" />
                 )}
               </TouchableOpacity>
@@ -662,23 +704,23 @@ const ScheduleTimeline = () => {
             
             <Text style={styles.__reservation_modal_label}>Select Barber:</Text>
             <View style={styles.__reservation_barber_buttons}>
-              {selectedSlotTime && getAvailableBarbers(selectedSlotTime).map((barber) => (
+              {selectedSlotTime && getAvailableBarbers(selectedSlotTime).map((employee) => (
                 <TouchableOpacity
-                  key={barber.id}
+                  key={employee.id}
                   style={[
                     styles.__reservation_barber_button,
-                    selectedBarberForReservation === barber.id && styles.__reservation_barber_button_selected,
+                    selectedBarberForReservation === employee.id && styles.__reservation_barber_button_selected,
                   ]}
-                  onPress={() => setSelectedBarberForReservation(barber.id)}
+                  onPress={() => setSelectedBarberForReservation(employee.id)}
                   activeOpacity={0.7}
                 >
                   <Text
                     style={[
                       styles.__reservation_barber_button_text,
-                      selectedBarberForReservation === barber.id && styles.__reservation_barber_button_text_selected,
+                      selectedBarberForReservation === employee.id && styles.__reservation_barber_button_text_selected,
                     ]}
                   >
-                    {barber.name}
+                    {employee.name}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -785,6 +827,48 @@ const ScheduleTimeline = () => {
                     </Text>
                   </View>
                 )}
+
+                <TouchableOpacity
+                  style={styles.__cancel_reservation_button}
+                  onPress={async () => {
+                    Alert.alert(
+                      t('schedule.cancelTitle') || 'Cancel Reservation',
+                      t('schedule.cancelMessage') || 'Are you sure you want to cancel this reservation?',
+                      [
+                        {
+                          text: t('schedule.no') || 'No',
+                          style: 'cancel',
+                        },
+                        {
+                          text: t('schedule.yes') || 'Yes',
+                          style: 'destructive',
+                          onPress: async () => {
+                            try {
+                              await reservationService.cancelReservation(selectedReservation.id);
+                              await loadReservations();
+                              setShowReservationDetail(false);
+                              Alert.alert(
+                                t('schedule.cancelSuccessTitle') || 'Reservation Canceled',
+                                t('schedule.cancelSuccessMessage') || 'Reservation has been canceled successfully.'
+                              );
+                            } catch (error) {
+                              Alert.alert(
+                                t('schedule.errorTitle') || 'Error',
+                                error.message || t('schedule.cancelError') || 'Failed to cancel reservation.'
+                              );
+                            }
+                          },
+                        },
+                      ]
+                    );
+                  }}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="close-circle" size={20} color="#EF4444" />
+                  <Text style={styles.__cancel_reservation_button_text}>
+                    {t('schedule.cancelReservation') || 'Cancel Reservation'}
+                  </Text>
+                </TouchableOpacity>
               </>
             )}
           </TouchableOpacity>
